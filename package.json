@@ -1,6 +1,6 @@
 {
   "name": "rpc-utils",
-  "version": "0.1.3-alpha",
+  "version": "1.0.0",
   "description": "Tools and utilities for use with RPCFW Services.",
   "main": "lib/index.js",
   "scripts": {
