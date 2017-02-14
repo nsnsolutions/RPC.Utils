@@ -267,9 +267,91 @@ function someHandler(data, callback) {
 
 ### Logger
 
-// TODO: Documentation: Logger
+The logger is a wrapper around a new instance of console.Console. By default
+this logger will write message to stdout only (including errors) with
+consideration to the current log level and the severity level of the logged
+message.
 
-Logger with logLevel support and extra methods to target sev.
+#### Constructor
+
+The constructor class takes four optional arguments passed in through a single
+options argument.  You can create the logger with an empty options argument to
+take all the default values.
+
+__Example:__
+
+```javascript
+var logger = new rpcUtils.Logger({});
+```
+
+You can provide arguments to alter the behavor of the logger.
+
+| Argument | Type   | Default | Description |
+| -------- | ------ | ------- | ----------- |
+| opts.header | String | 'SERVICE' | The header to wite infront of the log line. |
+| opts.level | String | 'info' | A valid log level. See below. |
+| opts.stdout | Stream | [STDOUT] | The stream to use as stdout. |
+| opts.stderr | Stream | [STDOUT] | The stream to use as stderr. |
+
+Valid log levels are exposed through rpcUtils.Logger.levels. They are listed
+here for simplicity:
+
+- SILENCE: No log output at all. This is used in unit tests.
+ - >> SILENCE, silence, quiet, none
+- ERROR: Only show log messages for errors.
+ - >> ERROR, error, ERR, err
+- WARN: Only show log messages for warnings and errors.
+ - >> WARN, warn, WARNING, warning
+- INFO: Only show log messages for information, warnings, and errors.
+ - >> INFO, info, DEFAULT, default
+- DEBUG: Show all log messages including debug.
+ - >> DEBUG, debug
+
+__Example__
+
+```javascript
+var logger = new rpcUtils.Logger({
+    header: "MyService",
+    level: rpcUtils.Logger.Levels.info
+});
+```
+
+#### Instance
+
+Once a logger has been created, it offers several methods in addition to the
+standard console object.
+
+- __level__: Gets the current log level.
+- __assert__: Same  as console.assert (severity: error)
+- __error__: same as console.error (severity: error)
+- __warn__: same as console.warn (severity: warning)
+- __info__: same as console.info (severity: info)
+- __log__: same as console.log (severity: info)
+- __time__: same as console.time (severity: info)
+- __timeEnd__: same as console.timeEnd (severity: info)
+- __timeD__: same as console.time (severity: debug)
+- __timeEndD__: same as console.timeEnd (severity: debug)
+- __trace__: same as console.trace (severity: debug)
+- __dir__: same as console.dir (severity: debug)
+- __debug__: same as console.info (severity: debug)
+
+__Example:__
+
+```javascript
+var logger = new rpcUtils.Logger({
+    header: "MyService",
+    level: rpcUtils.Logger.Levels.info
+});
+
+logger.debug("This message is not visable.");
+
+logger.info("This message is visable.");
+// [MyService:INF] This message is visable.
+
+logger.warn("This warning is visable.");
+// [MyService:WRN] This warning is visable.
+
+```
 
 ### CachedTable
 
