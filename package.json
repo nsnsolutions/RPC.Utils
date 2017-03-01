@@ -28,6 +28,7 @@
   "dependencies": {
     "async": "^2.1.4",
     "aws-sdk": "^2.7.21",
+    "jsonic": "^0.2.2",
     "moment": "^2.17.1",
     "redis": "^2.6.5",
     "uuid": "^3.0.1"
