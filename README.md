@@ -25,10 +25,11 @@ below. It outlines specificly how to use a class or function.
 
 - helpers: Simple helper functions for doing commen things.
 - Executor: RPC Execution workflow manager.
+- DocumentClient: DynamoDB Access client that takes advantage of chaching.
 - Logger: Logger with logLevel support and extra methods to target sev.
-- CachedTable: A data access class that uses Redis and DynamoDB.
 - Person: A object that can be used to check a users access level.
 - FilterHelper: A class for building complex dynamo filters.
+- CachedTable: DEPRICATED.
 - ServiceProxy: DEPRICATED.
 
 ### helpers
@@ -265,6 +266,255 @@ function someHandler(data, callback) {
 }
 ```
 
+### DocumentClient
+
+The DynamoDB DocumentClient is a wrapper around the
+AWS.DynamoDB.DocumentClient. It intercepts GET calls to dynamo and attempts to
+look the record up in REDIS before going to the database.
+
+This class's interface is a supper set of the AWS DynamoDB DocumentClient.
+Please review the [Amazon DynamoDB Documentation](http://docs.aws.amazon.com/AWSJavaScriptSDK/latest/AWS/DynamoDB/DocumentClient.html)
+ 
+#### Constructor
+
+The construction of the object is mostly identical to that of
+AWS.DynamoDB.DocumentClient except a new configuration parameter is examined.
+
+__Example:__
+
+```javascript
+var params = {
+    region: 'us-west-2',
+    cache: {
+        url: "redis://localhost/0",
+        ttl: 86000
+    }
+}
+
+var ddbClient = new rpcUtils.DynamoDB.DocumentClient(params);
+```
+
+You can provide additional arguments to the cache system. Here is a full list
+of supported parameters
+
+| Argument           | Type          | Default             | Description       |
+| ------------------ | ------------- | ------------------- | ----------------- |
+| cache.url          | String        | redis://localhost/0 | A url that identifies where to connect to the cache layer. |
+| cache.ttl          | Number        | 86000               | The number of seconds a record will live in the cache after each time it has been touched. |
+| cache.disableCache | Boolean       | false               | Configuration override to disable the caching layer. Inded for development only. |
+| cache.provider     | `Constructor` | null                | If provided, overrides the default cache provider to the one specified. |
+
+The disableCache option is intended to facilitate development.  In live
+environments, a secondary service named `VFS_DynamoCacheUpdater` is run on
+tables each time a table record is udpated. This deals with the complexity of
+cache invalidation.  If you are running your code locally, this service will
+not work to invalidate your local cache copy.  Because of this, it is
+recomended to use your local ETCD configuration to disable caching.
+
+__Example RCP Setup:__
+
+```javascript
+function bootstrap(bus, conf) {
+  ddbClient = new rpcUtils.DynamoDB.DocumentClient({
+    region: conf.shared.region,
+    cache: {
+      // ETCD Does not support datatypes. Convert from string to boolean.
+      disableCache: conf.shared.get('disableCache', 'false').toLowerCase() == "true",
+      url: conf.shared.dynamoCache,
+      ttl: 86000 // Cache time to live: 1 day.
+    }
+  });
+
+  /* ... */
+
+}
+```
+
+#### Method: Get
+
+Dynamo GET operation to fetch a single record by primary key.  This is the same
+function as the DynamoDB.DocumentClient.get operation. See the [Amazon DynamoDB DocumentClient GET documentation](http://docs.aws.amazon.com/AWSJavaScriptSDK/latest/AWS/DynamoDB/DocumentClient.html#get-property)
+
+There are a few operational diffrences between the AWS documentClient and the
+rpcUtils documentClient.
+
+1. If ConsistentRead is enabled, cache is bypassed.
+3. AttributesToGet is supported but the full record is pulled over the network.
+
+Additional Arguments:
+
+| Arguments   | Type    | Default | Description |
+| ----------- | ------- | ------- | ----------- |
+| BypassCache | Boolean | false   | If true, the record will be fetched from dynamo. This does update the cache provder with the new record. |
+
+__Example:__
+
+```javascript
+
+var params = {
+    TableName: 'MyTable',
+    Key: { id: "abc123" }
+}
+
+ddbClient.get(params, (err, data) => {
+    if(err)
+        console.log(err);
+    else
+        console.log(data);
+});
+```
+
+__Example Bypass Cache:__
+
+```javascript
+
+var params = {
+    TableName: 'MyTable',
+    BypassCache: true,
+    Key: { id: "abc123" }
+}
+
+ddbClient.get(params, (err, data) => {
+    if(err)
+        console.log(err);
+    else
+        console.log(data);
+});
+```
+
+The response data is the same as the AWS DynamoDB DocumentClient get operation
+with 1 addtional field that indicates if the record was fetched from cache or
+not.
+
+__Example Response:__
+
+```json
+{
+  Item: { id: "abc123", message: "Hello, World" },
+  ConsumedCapacity: null,
+  FromCache: true
+}
+```
+
+#### Method: Get Secondary Index
+
+__Please see warning at the bottom of this section.__
+
+Dynamo GETSI operation to fetch records by secondary keys.  This is similar
+functionality to that provded by the AWS.DynamoDB.DocumentClient.query
+operation except it follows the GET interface in query structure. 
+
+The primary diffrence between getSI and aws's query operation is that Filter
+expressions are NOT supported.
+
+The primary diffrence between get and getSI is that a secondary index can be
+provided, and data is returned with an array of Items as opposed to a single
+item.
+
+The same operational diffrences exist with concern to cach control options:
+
+1. If ConsistentRead is enabled, cache is bypassed.
+3. AttributesToGet is supported but the full record is pulled over the network.
+
+Additional Arguments:
+
+| Arguments   | Type    | Default | Description |
+| ----------- | ------- | ------- | ----------- |
+| BypassCache | Boolean | false   | If true, the record will be fetched from dynamo. This does update the cache provder with the new record. |
+
+__Example:__
+
+```javascript
+
+var params = {
+    TableName: 'MyTable',
+    IndexName: 'message-index',
+    Key: { message: "Hello, World" }
+}
+
+ddbClient.getSI(params, (err, data) => {
+    if(err)
+        console.log(err);
+    else
+        console.log(data);
+});
+```
+
+__Example Bypass Cache:__
+
+```javascript
+
+var params = {
+    TableName: 'MyTable',
+    BypassCache: true,
+    IndexName: 'message-index',
+    Key: { message: "Hello, World" }
+}
+
+ddbClient.getSI(params, (err, data) => {
+    if(err)
+        console.log(err);
+    else
+        console.log(data);
+});
+```
+
+The response data is the same as the AWS DynamoDB DocumentClient get operation
+except a list if Items is returned and 1 addtional field that indicates if the
+records where fetched from cache or not.
+
+__Example Response:__
+
+```json
+{
+  Items: [ { id: "abc123", message: "Hello, World" } ],
+  ConsumedCapacity: null,
+  FromCache: true
+}
+```
+
+__WARNING: Due to the way DynamoDB Works and the concept of secondary indexes,
+it is possible to retrieve an incomplete set of information using cache.__
+
+Because of this, it is recomended that you only use secondary indexes that
+return a single record OR only fetch on SI for records that you know are in
+cache.
+
+#### Method: Close
+
+Close the connection to the cache provider.
+
+__Example:__
+
+```javascript
+if(ddbClient && ddbClient.close)
+    ddbClient.close();
+```
+
+#### Method: Flush
+
+Clear a key from cache.
+
+| Argument  | Type   | Default | Description |
+| --------- | ------ | ------- | ----------- |
+| TableName | String | N/A     | The table of which the record is a member. |
+| IndexName | String | null    | The index name represented in key. (Do not include if key is a primary key.) |
+| Key       | Object | N/A     | The object that contains the key that identifies the record. |
+
+__Example:__
+
+```javascript
+var params = {
+    TableName: 'MyTable',
+    Key: { id: "abc123" }
+};
+
+ddbClient.flush(params, (err) => {
+    if(err)
+        console.log(err);
+});
+```
+
 ### Logger
 
 The logger is a wrapper around a new instance of console.Console. By default
@@ -351,6 +601,197 @@ logger.info("This message is visable.");
 logger.warn("This warning is visable.");
 // [MyService:WRN] This warning is visable.
 
+```
+
+### Person
+
+A Person object represents claim information decoded by RPC.AccountService.  It
+has methods to simplify authority checking and validates required data.
+
+Person is a construction method that requires a claim object from
+RPC.AccountService.
+
+__NOTE: There is a plan to implement the RPC.AccountService call on this object once
+the Proxy interface is fully understood.__
+
+__Example:__
+
+```javascript
+
+// Where claim was the result of a seneca.act call to AccountService.GetToken
+var person = new Person(claim);
+```
+
+#### Properties
+
+| Name               | Type   | Description                                                          |
+| ------------------ | ------ | -------------------------------------------------------------------- |
+| sponsorId          | String | Gets the Sponsor ID that issued the claim.                           |
+| sponsorName        | String | Gets the name of the Sponsor that issued the claim.                  |
+| sponsorKey         | String | Gets the Sponsor Key that issued the claim.                          |
+| clientId           | String | Gets the Client ID The user belongs to.                              |
+| clientName         | String | Gets the Client Name the user belongs to.                            |
+| clientKey          | String | Gets the Client Key that the user belongs to.                        |
+| userId             | String | Gets the Sponsor proivded unique identifier.                         |
+| username           | String | Gets the Sponsor provided username.                                  |
+| email              | String | Gets the Sponsor provided email address.                             |
+| fullName           | String | Gets the Sponsor Provided full name.                                 |
+| photoUrl           | String | Gets the Sponsor Provided URL.                                       |
+| phoneNumber        | String | Gets the Sponsor Provided phone number for user.                     |
+| address.singleLine | String | Gets the Sponsor Provided address of user.                           |
+| address.line1      | String | Gets the Sponsor Provided Address of user (line 1).                  |
+| address.line2      | String | Gets the Sponsor Provided Address of user (line 2).                  |
+| address.city       | String | Gets the Sponsor Provided Address of user (City).                    |
+| address.state      | String | Gets the Sponsor Provided Address of user (State).                   |
+| address.zip        | String | Gets the Sponsor Provided Address of user (Zip).                     |
+| roles              | Array  | Gets an array of all the roles assigned to this user by the sponsor. |
+
+#### Method: inRole
+
+Returns a boolean value indicating weather a claim's role data includes a
+specific value.
+
+__Example:__
+```javascript
+if(person.inRole('JOB:30')) {
+    // person has exactly level 30 access to job
+}
+```
+
+#### Method: hasAuthority
+
+Returns a boolean value indicating weather a claim's role data meets or exceeds
+the given authority requirements.
+
+__Example:__
+```javascript
+if(person.hasAuthority('JOB:30')) {
+    // person has atleast level 30 access to job
+}
+```
+
+#### Method: hasAnyAuthority
+
+Returns a boolean value indicating weather a claim's role data meets or exceeds
+at least one of the given set of authority requirements.
+
+__Example:__
+```javascript
+if(person.hasAnyAuthority(['JOB:30', 'ACC:20'])) {
+    // person has either atleast level 30 access to job or level 20 access to acc.
+}
+```
+
+#### Method: hasAllAuthority
+
+Returns a boolean value indicating weather a claim's role data meets or exceeds
+all of the given set of authority requirements.
+
+__Example:__
+```javascript
+if(person.hasAllAuthority(['JOB:30', 'ACC:20'])) {
+    // person has atleast level 30 access to job and level 20 access to acc.
+}
+```
+
+#### Method: toString
+
+Returns string information that represents the current claim. Useful for debug,
+not intended for customer consumption.
+
+__Example:__
+```javascript
+console.log(person.toString())
+// <Person(fullName='John Public' email='jonny@velma.com')>
+```
+
+### FilterHelper
+
+Filter helper is a class used to create DynamoDb query methods. This is uesfull
+for implementing filter methods on sets of data.
+
+Filter Helper is a constructor function that returns an instance of
+filterHelper.
+
+__Arguments are the same arguments you would pass to AWS.DynamoDB.Query.__ You
+can use this to preload specific details about the operation such as hash or
+range key limits. __TableName is required.__
+
+__Example:__
+```javascript
+var query = new rpcUtils.FilterHelper({
+    TableName: "MyTable",
+    KeyConditionExpression: '#hkey = :hkey',
+    ExpressionAttributeNames: { '#hkey': "someKey" },
+    ExpressionAttributeValues: { ':hkey': "abc123" }
+});
+```
+
+#### StaticMethod: parseFilterString
+
+Convert a string of filter data into an array suitable for use with
+filterHelper.addFilters() method.
+
+This is a static method hung directly off the constructor class.
+
+__Example:__
+```javascript
+var str = 'createDate:BETWEEN:2017-01-01T00:00:00.000Z,2017-02-01T00:00:00.000Z;price:GE:100';
+var filterArray = rpcUtils.FilterHelper.parseFilterString(str);
+```
+
+The filter string logic is as follows:
+
+1. Split string on ';'
+2. Split part on ':'
+3. part[0] is the __FieldName__
+4. part[1] is the __Operator__
+5. split part[2] on ',' is the operation __Argument__.
+
+#### Method: addFilter
+
+Add more filter data to the filterHelper query object.
+
+| Argument  | Type   | Default | Description.                                                            |
+| --------- | ------ | ------- | ----------------------------------------------------------------------- |
+| FieldName | String | N/A     | The name of the field. This can be a nested field name. eg: 'user.name' |
+| Operation | String | N/A     | Operation selector _See below_.                                         |
+| Argument  | Array  | N/A     | An array of operation dependent arguments.                              |
+
+__Example:__
+```javascript
+// Add BETWEEN filter
+query.addFilter('createDate', 'BETWEEN', [ '2017-01-01T00:00:00.000Z', '2017-02-01T00:00:00.000Z'])
+
+// Add Equality filter
+query.addFilter('price', '>=', [ 100 ])
+```
+
+#### Method: addFilters
+
+Add an array of filters to the filterHelper query object.
+
+| Argument | Type  | Default | Description                      |
+| -------- | ----- | ------- | -------------------------------- |
+| args     | Array | N/A     | An array of addFilter arguments. |
+
+```javascript
+query.addFilters([
+    [ 'createDate', 'BETWEEN', [ '2017-01-01T00:00:00.000Z', '2017-02-01T00:00:00.000Z'] ],
+    [ 'price',      '>=',      [ 100 ] ]
+]);
+```
+
+#### Method: compileQuery
+
+Build the query with all the filters applied to the instance of filterHelper.
+
+```javascript
+vary qs = query.compileQuery();
+
+dynamoDb.query(qs, (err, data) => {
+    ...
+});
 ```
 
 ### CachedTable
@@ -610,197 +1051,6 @@ __Example:__
 ```javascript
 console.log(table.indexes);
 // { ... }
-```
-
-### Person
-
-A Person object represents claim information decoded by RPC.AccountService.  It
-has methods to simplify authority checking and validates required data.
-
-Person is a construction method that requires a claim object from
-RPC.AccountService.
-
-__NOTE: There is a plan to implement the RPC.AccountService call on this object once
-the Proxy interface is fully understood.__
-
-__Example:__
-
-```javascript
-
-// Where claim was the result of a seneca.act call to AccountService.GetToken
-var person = new Person(claim);
-```
-
-#### Properties
-
-| Name               | Type   | Description                                                          |
-| ------------------ | ------ | -------------------------------------------------------------------- |
-| sponsorId          | String | Gets the Sponsor ID that issued the claim.                           |
-| sponsorName        | String | Gets the name of the Sponsor that issued the claim.                  |
-| sponsorKey         | String | Gets the Sponsor Key that issued the claim.                          |
-| clientId           | String | Gets the Client ID The user belongs to.                              |
-| clientName         | String | Gets the Client Name the user belongs to.                            |
-| clientKey          | String | Gets the Client Key that the user belongs to.                        |
-| userId             | String | Gets the Sponsor proivded unique identifier.                         |
-| username           | String | Gets the Sponsor provided username.                                  |
-| email              | String | Gets the Sponsor provided email address.                             |
-| fullName           | String | Gets the Sponsor Provided full name.                                 |
-| photoUrl           | String | Gets the Sponsor Provided URL.                                       |
-| phoneNumber        | String | Gets the Sponsor Provided phone number for user.                     |
-| address.singleLine | String | Gets the Sponsor Provided address of user.                           |
-| address.line1      | String | Gets the Sponsor Provided Address of user (line 1).                  |
-| address.line2      | String | Gets the Sponsor Provided Address of user (line 2).                  |
-| address.city       | String | Gets the Sponsor Provided Address of user (City).                    |
-| address.state      | String | Gets the Sponsor Provided Address of user (State).                   |
-| address.zip        | String | Gets the Sponsor Provided Address of user (Zip).                     |
-| roles              | Array  | Gets an array of all the roles assigned to this user by the sponsor. |
-
-#### Method: inRole
-
-Returns a boolean value indicating weather a claim's role data includes a
-specific value.
-
-__Example:__
-```javascript
-if(person.inRole('JOB:30')) {
-    // person has exactly level 30 access to job
-}
-```
-
-#### Method: hasAuthority
-
-Returns a boolean value indicating weather a claim's role data meets or exceeds
-the given authority requirements.
-
-__Example:__
-```javascript
-if(person.hasAuthority('JOB:30')) {
-    // person has atleast level 30 access to job
-}
-```
-
-#### Method: hasAnyAuthority
-
-Returns a boolean value indicating weather a claim's role data meets or exceeds
-at least one of the given set of authority requirements.
-
-__Example:__
-```javascript
-if(person.hasAnyAuthority(['JOB:30', 'ACC:20'])) {
-    // person has either atleast level 30 access to job or level 20 access to acc.
-}
-```
-
-#### Method: hasAllAuthority
-
-Returns a boolean value indicating weather a claim's role data meets or exceeds
-all of the given set of authority requirements.
-
-__Example:__
-```javascript
-if(person.hasAllAuthority(['JOB:30', 'ACC:20'])) {
-    // person has atleast level 30 access to job and level 20 access to acc.
-}
-```
-
-#### Method: toString
-
-Returns string information that represents the current claim. Useful for debug,
-not intended for customer consumption.
-
-__Example:__
-```javascript
-console.log(person.toString())
-// <Person(fullName='John Public' email='jonny@velma.com')>
-```
-
-### FilterHelper
-
-Filter helper is a class used to create DynamoDb query methods. This is uesfull
-for implementing filter methods on sets of data.
-
-Filter Helper is a constructor function that returns an instance of
-filterHelper.
-
-__Arguments are the same arguments you would pass to AWS.DynamoDB.Query.__ You
-can use this to preload specific details about the operation such as hash or
-range key limits. __TableName is required.__
-
-__Example:__
-```javascript
-var query = new rpcUtils.FilterHelper({
-    TableName: "MyTable",
-    KeyConditionExpression: '#hkey = :hkey',
-    ExpressionAttributeNames: { '#hkey': "someKey" },
-    ExpressionAttributeValues: { ':hkey': "abc123" }
-});
-```
-
-#### StaticMethod: parseFilterString
-
-Convert a string of filter data into an array suitable for use with
-filterHelper.addFilters() method.
-
-This is a static method hung directly off the constructor class.
-
-__Example:__
-```javascript
-var str = 'createDate:BETWEEN:2017-01-01T00:00:00.000Z,2017-02-01T00:00:00.000Z;price:GE:100';
-var filterArray = rpcUtils.FilterHelper.parseFilterString(str);
-```
-
-The filter string logic is as follows:
-
-1. Split string on ';'
-2. Split part on ':'
-3. part[0] is the __FieldName__
-4. part[1] is the __Operator__
-5. split part[2] on ',' is the operation __Argument__.
-
-#### Method: addFilter
-
-Add more filter data to the filterHelper query object.
-
-| Argument  | Type   | Default | Description.                                                            |
-| --------- | ------ | ------- | ----------------------------------------------------------------------- |
-| FieldName | String | N/A     | The name of the field. This can be a nested field name. eg: 'user.name' |
-| Operation | String | N/A     | Operation selector _See below_.                                         |
-| Argument  | Array  | N/A     | An array of operation dependent arguments.                              |
-
-__Example:__
-```javascript
-// Add BETWEEN filter
-query.addFilter('createDate', 'BETWEEN', [ '2017-01-01T00:00:00.000Z', '2017-02-01T00:00:00.000Z'])
-
-// Add Equality filter
-query.addFilter('price', '>=', [ 100 ])
-```
-
-#### Method: addFilters
-
-Add an array of filters to the filterHelper query object.
-
-| Argument | Type  | Default | Description                      |
-| -------- | ----- | ------- | -------------------------------- |
-| args     | Array | N/A     | An array of addFilter arguments. |
-
-```javascript
-query.addFilters([
-    [ 'createDate', 'BETWEEN', [ '2017-01-01T00:00:00.000Z', '2017-02-01T00:00:00.000Z'] ],
-    [ 'price',      '>=',      [ 100 ] ]
-]);
-```
-
-#### Method: compileQuery
-
-Build the query with all the filters applied to the instance of filterHelper.
-
-```javascript
-vary qs = query.compileQuery();
-
-dynamoDb.query(qs, (err, data) => {
-    ...
-});
 ```
 
 ### ServiceProxy
