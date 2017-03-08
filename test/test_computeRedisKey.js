@@ -10,7 +10,7 @@ describe('computeRedisKey', () => {
         var srvName=uuid(),
             varName=uuid();
 
-        var ret = rpcUtils.computeRedisKey(srvName, varName)
+        var ret = rpcUtils.helpers.computeRedisKey(srvName, varName)
         assert.equal(ret, `${srvName}:${varName}`);
     });
 
@@ -20,7 +20,7 @@ describe('computeRedisKey', () => {
             varName='var',
             field="field:1";
 
-        var ret = rpcUtils.computeRedisKey(srvName, varName, field)
+        var ret = rpcUtils.helpers.computeRedisKey(srvName, varName, field)
         assert.equal(ret, `${srvName}:${varName}:field=1`);
     });
 
@@ -30,7 +30,7 @@ describe('computeRedisKey', () => {
             varName='var',
             fields="zed:9,yanky:8,xray:7";
 
-        var ret = rpcUtils.computeRedisKey(srvName, varName, fields)
+        var ret = rpcUtils.helpers.computeRedisKey(srvName, varName, fields)
         assert.equal(ret, `${srvName}:${varName}:zed=9:yanky=8:xray=7`);
     });
 
@@ -40,7 +40,7 @@ describe('computeRedisKey', () => {
             varName='var',
             fields={field1: 1, field2: 2};
 
-        var ret = rpcUtils.computeRedisKey(srvName, varName, fields)
+        var ret = rpcUtils.helpers.computeRedisKey(srvName, varName, fields)
         assert.equal(ret, `${srvName}:${varName}:field1=1:field2=2`);
     });
 
@@ -51,7 +51,7 @@ describe('computeRedisKey', () => {
             fields={field1: 1, field2: 2},
             moreFields={field3: 3, field4: 4};
 
-        var ret = rpcUtils.computeRedisKey(srvName, varName, fields, moreFields)
+        var ret = rpcUtils.helpers.computeRedisKey(srvName, varName, fields, moreFields)
         assert.equal(ret, `${srvName}:${varName}:field1=1:field2=2:field3=3:field4=4`);
     });
 
@@ -62,7 +62,7 @@ describe('computeRedisKey', () => {
             fields={field1: 1, field2: 2},
             moreFields="field3:3,field4:4";
 
-        var ret = rpcUtils.computeRedisKey(srvName, varName, fields, moreFields)
+        var ret = rpcUtils.helpers.computeRedisKey(srvName, varName, fields, moreFields)
         assert.equal(ret, `${srvName}:${varName}:field1=1:field2=2:field3=3:field4=4`);
     });
 
@@ -73,7 +73,7 @@ describe('computeRedisKey', () => {
             fields="field1:1",
             moreFields="field1:10";
 
-        var ret = rpcUtils.computeRedisKey(srvName, varName, fields, moreFields)
+        var ret = rpcUtils.helpers.computeRedisKey(srvName, varName, fields, moreFields)
         assert.equal(ret, `${srvName}:${varName}:field1=1:field1=10`);
     });
 });
