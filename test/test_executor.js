@@ -14,13 +14,13 @@ describe('Executor', () => {
             (console, state, done) => { state.count++; done(null, state); },
         ];
 
-        var exec = new rpcutil.Executor({
+        var exec = new rpcutil.Workflow.Executor({
             name: "All steps execute",
             code: "asd1",
             tasks: tasks,
             done: _done,
             logLevel: 'silence'
-        }).run({ count: 0 });
+        }).run(new rpcutil.VerifiableObject({ count: 0 }));
 
         function _done(err, state) {
             assert.equal(state.count, tasks.length, "Count of executions is not the same as count of tasks.");
@@ -39,13 +39,13 @@ describe('Executor', () => {
             (console, state, done) => { state.count++; done(null, state); },
         ];
 
-        var exec = new rpcutil.Executor({
+        var exec = new rpcutil.Workflow.Executor({
             name: "All steps execute",
             code: "asdf",
             tasks: tasks,
             done: _done,
             logLevel: 'silence'
-        }).run(_state);
+        }).run(new rpcutil.VerifiableObject(_state));
 
         function _done(err, state) {
             assert.notEqual(_state.count, tasks.length, "Count executed is the same as count of tasks.");
@@ -65,13 +65,13 @@ describe('Executor', () => {
             (console, state, done) => { state.count++; done(null, state); },
         ];
 
-        var exec = new rpcutil.Executor({
+        var exec = new rpcutil.Workflow.Executor({
             name: "All steps execute",
             code: "asdf",
             tasks: tasks,
             done: _done,
             logLevel: 'silence'
-        }).run(_state);
+        }).run(new rpcutil.VerifiableObject(_state));
 
         function _done(err, state) {
             assert.equal(err, _error, "Diffrent error.");
@@ -90,13 +90,13 @@ describe('Executor', () => {
             (console, state, done) => { state.count++; done(null, state); },
         ];
 
-        var exec = new rpcutil.Executor({
+        var exec = new rpcutil.Workflow.Executor({
             name: "All steps execute",
             code: "asdf",
             tasks: tasks,
             done: { success: _done },
             logLevel: 'silence'
-        }).run(_state);
+        }).run(new rpcutil.VerifiableObject(_state));
 
         function _done(state) {
             assert.equal(state.count, tasks.length, "execution count differs from task count.");
@@ -115,13 +115,13 @@ describe('Executor', () => {
             (console, state, done) => { state.count++; done(null, state); },
         ];
 
-        var exec = new rpcutil.Executor({
+        var exec = new rpcutil.Workflow.Executor({
             name: "All steps execute",
             code: "asdf",
             tasks: tasks,
             done: { CustomError: _done },
             logLevel: 'silence'
-        }).run(_state);
+        }).run(new rpcutil.VerifiableObject(_state));
 
         function _done(err) {
             assert.equal(err, "Test Error (ERR:asdf.04)");
