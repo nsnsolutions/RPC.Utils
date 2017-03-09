@@ -29,8 +29,6 @@ below. It outlines specificly how to use a class or function.
 - Logger: Logger with logLevel support and extra methods to target sev.
 - Person: A object that can be used to check a users access level.
 - FilterHelper: A class for building complex dynamo filters.
-- CachedTable: DEPRICATED.
-- ServiceProxy: DEPRICATED.
 
 ### helpers
 
@@ -43,6 +41,8 @@ Here is the full list of functions.
 - fmtDate: Create or format a datetime string.
 - fmtTimestamp: Create or format a unix timestamp.
 - toHex: Convert an integer to hex.
+- computeRedisKey: Produce a service specific variable used to store data in
+  redis.
 
 #### fmtUuid
 
@@ -123,6 +123,30 @@ returned.
 ```javascript
 var hex_value = rpcUtils.helpers.toHex(42, 8); // will return 0000002A
 ```
+#### computeRedisKey
+
+Produce a service specific variable used to store data in redis.
+
+This method can be used to create a key for a service that can have any level
+of specificity as required for the applications needs.
+
+| Arguments | Type   | Default   | Description |
+| --------- | ------ | --------- | ----------- |
+| service   | String | N/A       | The name of the service. eg: tokenService |
+| variable  | String | N/A       | A application spcific identifier.         |
+| fields    | Object | undefined | A map of keys to values that will be used to create specific identifers for a key |
+| ...       | Object | undefined | Additional field groups. |
+
+__Example:__
+
+```javascript
+var key = rpcUtils.helpers.computeRedisKey('MyService', 'MyVar', { Id: 123, Type: 'apples' });
+redis.sadd(key, 'New apples for customer 123')
+```
+
+The above example would produce the following redis key:
+
+```MyService:MyVar:Id=123:Type=apples```
 
 ### Executor
 
@@ -143,6 +167,9 @@ The constructor parameters are as follows.
 | opts.done | Callback | N/A | An RPCDone object containing a success method or a standard callback method. Executed at end of workflow. |
 | opts.logLevel | String | [ENV Default] | The level to set the logger to for this workflow execution. |
 | opts.repr | Function | [Passthrough] | Optional. A method that converts the last state into a response object. |
+| opts.authorizer | Function | false | Optional. A function that accepts a principal object and returns a boolean value indicating if the action requested is authorized. |
+| opts.required | Array | [] | Optional. A list of required field specifications. |
+| opts.optional | Array | [] | Optional. A list of optional field specifications. |
 
 The following sections will provide more detail for each parameter.
 
@@ -231,6 +258,104 @@ function greet_v1(o) {
 }
 ```
 
+##### authorizer
+
+A function that accepts a principal object and returns a boolean value
+indicating if the action requested is authorized.
+
+An authorizer can be any function that returns a true or false but there are a
+few canned authorizers in the RPC-Utils.Principal.Authorizers namespace.
+
+- isAuthenticated: Returns true if the current principal is authenticated (not guest)
+- withAll: Returns true if the current principal has ALL of the access required by the given access list.
+- withAny: Returns true if the current principal has ANY of the access required by the given access list.
+- with: Returns true if the current principal has access as required by the given access string.
+
+__Examples:__
+
+```javascript
+params = {
+
+    // Will require a user was idetified that is not a guest.
+    authorizer: rpcUtils.Principal.Authorizers.isAuthenticated(),
+
+    // Will require a user has, at least, all the given access levels.
+    authorizer: rpcUtils.Principal.Authorizers.withAll(['JOB:10', 'PRODUCT:10']),
+
+    // Will require a user has, at least, one of the given access levels.
+    authorizer: rpcUtils.Principal.Authorizers.withAny(['JOB:10', 'PRODUCT:10']),
+
+    // Will require a user has at least the given level of access.
+    authorizer: rpcUtils.Principal.Authorizers.with('JOB:10'),
+}
+```
+
+##### required
+
+A list of required field specifications.
+
+A field specifcation has the following arguments:
+
+| Argument  | Required | Description |
+| --------- | -------- | ----------- |
+| field     | Yes      | Identifies the name of the required field. |
+| type      | No       | If defined, identifies the type for the given field.  |
+| minLength | No       | If defined, idnetifies the min length of the data in the field |
+| maxLegnth | No       | If defined, identifies the max length of the data in the field |
+| regex     | No       | If defined, provides regular expression (as string) that will be used to test the value in the field. |
+
+If any of the checks fail, a badRequest is sent to the user and the workflow
+execution is stopped.
+
+__Example:__
+
+```javascript
+var params = {
+    required = [
+        { field: 'arg1' },
+        { field: 'arg2', type: String },
+        { field: 'arg3', type: String, regex: '[a-z]{3,10} }
+    ]
+}
+```
+
+##### optional
+
+A list of optional field specifications.
+
+A field specifcation has the following arguments:
+
+| Argument  | Required | Description |
+| --------- | -------- | ----------- |
+| field     | Yes      | Identifies the name of the required field. |
+| type      | No       | If defined, identifies the type for the given field.  |
+| minLength | No       | If defined, idnetifies the min length of the data in the field |
+| maxLegnth | No       | If defined, identifies the max length of the data in the field |
+| regex     | No       | If defined, provides regular expression (as string) that will be used to test the value in the field. |
+| default   | No       | If defined, will set the value on state if the user didnt provide a vaule.  |
+
+Checks are only made if the field is included in the state. If it is not
+included and a default value is provided, the state will be set with the given
+field using the value defined in default.
+
+If a check is made and it fails any of the steps, a badRequest is sent to the
+user and the workflow execution is stopped.
+
+__Example:__
+
+```javascript
+var params = {
+    optional = [
+        { field: 'arg1' },
+        { field: 'arg2', type: String },
+        { field: 'arg3', type: String, regex: '[a-z]{3,10} }
+
+        // note that the default value does not have to validate.
+        { field: 'arg4', type: String, regex: '[a-z]{3,10}, default: false }
+    ]
+}
+```
+
 #### Run an executor
 
 To execute a workflow using an instanciated execturor, call run on the executor
@@ -258,10 +383,17 @@ function someHandler(data, callback) {
         tasks: [ 
             validate,
             task1_greet
-        ]
+        ],
+        required: [
+            { field: 'name', type: String, regex: '[a-z]{3,10}' }
+        ],
+        optional: [
+            { field: 'flag', type: Boolean, default: false }
+        ],
+        authorizer: rpcUtils.Principal.Authorizers.with('access:1')
     };
 
-    var executor = new rpcUtils.Executor(params);
+    var executor = new rpcUtils.Workflow.Executor(params);
     executor.run(data);
 }
 ```
@@ -793,267 +925,3 @@ dynamoDb.query(qs, (err, data) => {
     ...
 });
 ```
-
-### CachedTable
-
-CachedTable is an object that can be used to fetch and save records from
-DynamoDB using a caching layer for performance and more efficient read
-consumption.
-
-CachedTable is a constructor function that will return a cachedTable instance.
-There is also a static method that will build the cachedTable definition based
-on a given DynamoDb table name.
-
-#### Constructor
-
-Create a cachedTable instance using the given DynamoDb Table Description.
-
-| Argument          | Type   | Default   | Description |
-| ----------------- | ------ | --------- | ----------- |
-| opts.dynamoClient | Object | N/A       | A reference to a connected AWS.DynamoDB object. |
-| opts.redisClient  | Object | N/A       | A reference to a connected redis.client object. |
-| opts.ttl          | Number | 86000     | Optional: The amount of time, in seconds, a cache item should live by default. |
-| opts.logLevel     | String | 'DEFAULT' | Optional: The named log level to use in the logger. |
-| opts.tableDesc    | Object | N/A       | A DynamoDB Table Description as returned by AWS.DynamoDB.describeTable method. |
-
-It is not recomended to call this constructor directly, but it is available if
-required. You should use ```CachedTable.Create``` whenever possible.
-
-__Example:__
-
-```javascript
-var dynamoClient = new AWS.DynamoDB({ region: REGION });
-var redisClient = redis.createClient();
-
-dynamoClient.describeTable({ TableName: "myTable" }, (err, desc) => {
-
-    if(err) { /* Handle Error */ }
-
-    var cachedTable = new CachedTable({ 
-        dynamoClient: dynamoClient,
-        redisClient: redisClient,
-        logLevel: state.get('logLevel'),
-        tableDesc: desc.Table
-    });
-
-    // cachedTable is ready to use.
-});
-
-```
-
-Since cachedTable only represents __one__ dynamo table, it is likely that you
-will need to do quite a buit of work to create all the references you need. To
-simplify that, CachedTable.Create is the recomended method for created a
-instance of CachedTable.
-
-#### CachedTable.Create
-
-Create a CachedTable or map of CachedTable objects from the given tableName or
-tableMap respectivly using the provided Dynamo Client connection.
-
-| Argument          | Type     | Default   | Description                                                                    |
-| ----------------- | -------- | --------- | ------------------------------------------------------------------------------ |
-| opts.dynamoClient | Object   | N/A       | A reference to a connected AWS.DynamoDB object.                                |
-| opts.redisClient  | Object   | N/A       | A reference to a connected redis.Client object.                                |
-| opts.tableName    | String   | null      | The name of the table for which to create the cache Object.                    |
-| opts.tableMap     | Object   | null      | A map that identifes what tables to load.                                      |
-| opts.ttl          | Number   | 86000     | Optional: The amount of time, in seconds, a cache item should live by default. |
-| opts.logLevel     | String   | "DEFAULT" | Optional: The named log level to use in the logger.                            |
-| cb                | Function | N/A       | Callback to execute once complete.                                             |
-
-_NOTE: One of the two argumetns: ```opts.tableName```, ```opts.tableMap```,
-must be specified._
-
-_NOTE: The map keys can be any thing you would like. The value of each field in
-the map should be the name of the table for which to create the CachedTable
-object.  Example: ```{ t1: "Dynamo_TableName", t2: "Dynamo_TableName2" }```_
-
-_NOTE: If a single tableName is given, the data will contain an instance of
-CachedTable that represents that table.  If a tableMap is given, the data will
-contain a map of CachedTable instances that match the keys of the given
-tablemap._
-
-__Example (Single Table):__
-
-```javascript
-
-var params={
-    dynamoClient: new AWS.DynamoDb({region: REGION}),
-    redisClient: redis.createClient(),
-    tableName: 'MyTable'
-}
-
-CachedTable.Create(params, (err, table) => {
-    if(err) { /* Handle error */ }
-
-    // table is ready to use.
-});
-
-```
-
-__Example (Multi Table):__
-
-```javascript
-
-var params={
-    dynamoClient: new AWS.DynamoDb({region: REGION}),
-    redisClient: redis.createClient(),
-    tableMap: {
-        myTable: 'MyTable',
-        yourTable: 'YourTable'
-    }
-}
-
-CachedTable.Create(params, (err, tables) => {
-    if(err) { /* Handle error */ }
-
-    // tables.myTable is ready to use.
-    // tables.yourTable is ready to use.
-});
-
-```
-
-#### Method: fetch
-
-Retrieve a record.
-
-This method will attempt to retrieve the record from cache. If the
-data is not found, it will go to the database for the record. If
-found, the record will be returned and added to cache. If not found, a null
-value will be returned.
-
-| Agument       | Type     | Default             | Description                                                        |
-| ------------- | -------- | ------------------- | ------------------------------------------------------------------ |
-| opts.key      | Object   | N/A                 | An object containting the keys needed to located the record.       |
-| opts.index    | String   | null                | Optional: A string indicating the secondary index (if applicable). |
-| opts.ttl      | Number   | [instance.ttl]      | Optional: Override the time, in seconds, the cache should live.    |
-| opts.logLevel | String   | [instance.logLevel] | Optional: Override the log level used for this invocation.         |
-| cb            | Function | N/A                 | A callback function containing the result of the fetch.            |
-
-__Example (Primary Index):__
-
-```javascript
-var params = {
-    key: { someKey: 'abc123' },
-    logLevel: state.get('logLevel')
-};
-table.fetch(params, (err, record) => {
-    if(err) { /* handle error */ }
-
-    // record is a Object that represents the DynamoDB Record.
-
-});
-```
-
-Fetch will wrap a record object and decorate 3 helper methods that can be used
-to write changes back to cache/storage.
-
-- $save: Replace cache and storage with this object.
-- $update: Save only changed fields (Not yet implemented).
-- $flush: Reset record to initial fetch state.
-
-
-#### Method: save
-
-Save an item to the database.
-
-This operation will completely overwrite the current state of the
-object. Any fields changes done outside of this process will be
-clobbered
-
-| Agument       | Type     | Default             | Description                                                     |
-| ------------- | -------- | ------------------- | --------------------------------------------------------------- |
-| opts.item     | Object   | N/A                 | The item to save.                                               |
-| opts.ttl      | Number   | [instance.ttl]      | Optional: Override the time, in seconds, the cache should live. |
-| opts.logLevel | String   | [instance.logLevel] | Optional: Override the log level used for this invocation.      |
-| cb            | Function | N/A                 | A callback function containing the result of the fetch.         |
-
-__Example:__
-
-```javascript
-var params = {
-    item: record,
-    logLevel: state.get('logLevel')
-};
-
-table.save(params, (err) => {
-    if(err) { /* handle error */ }
-})
-```
-
-#### Method: update (NOT IMPLEMENTED)
-
-__This method is not yet implemetned - The interface might  change.__
-
-Save only changed fields in an item to the database.
-
-| Agument       | Type     | Default             | Description                                                     |
-| ------------- | -------- | ------------------- | --------------------------------------------------------------- |
-| opts.item     | Object   | N/A                 | The item to get fields to save.                                 |
-| opts.ttl      | Number   | [instance.ttl]      | Optional: Override the time, in seconds, the cache should live. |
-| opts.logLevel | String   | [instance.logLevel] | Optional: Override the log level used for this invocation.      |
-| cb            | Function | N/A                 | A callback function containing the result of the fetch.         |
-
-__Example:__
-
-```javascript
-var params = {
-    item: record,
-    logLevel: state.get('logLevel')
-};
-
-table.update(params, (err) => {
-    if(err) { /* handle error */ }
-})
-```
-
-#### Method: flush
-
-Dump record from cache.
-
-| Agument       | Type     | Default             | Description                                                     |
-| ------------- | -------- | ------------------- | --------------------------------------------------------------- |
-| opts.item     | Object   | N/A                 | The item to get fields to save.                                 |
-| opts.logLevel | String   | [instance.logLevel] | Optional: Override the log level used for this invocation.      |
-| cb            | Function | N/A                 | A callback function containing the result of the fetch.         |
-
-__Example:__
-
-```javascript
-var params = {
-    item: record,
-    logLevel: state.get('logLevel')
-};
-
-table.flush(params, (err) => {
-    if(err) { /* handle error */ }
-})
-```
-
-#### Getter: tableName
-
-Returns the name of the Dynamo Table.
-
-__Example:__
-
-```javascript
-console.log(table.tableName);
-// MyTable
-```
-
-#### Getter: indexes
-
-Returns a list of indexes identified by the TableDescription when the chached
-table instance was created.
-
-__Example:__
-
-```javascript
-console.log(table.indexes);
-// { ... }
-```
-
-### ServiceProxy
-
-DEPRICATED. Do not use this method. The details of how to integrate common rpc
-calls is still up in the air.
