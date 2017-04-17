@@ -1,5 +1,7 @@
-## API Documentation
+These docs are incomplete. The old documentation is still available
+[here](OldDocs.md).
 
-Not Yet Implemented.
+## Content
 
-The old documents are still available [here](OldDocs.md)
+* [Plugins](/docs/Plugins.md)
+  * [Publish/Subscribe](/docs/Plugins-PubSubPlugin.md)
