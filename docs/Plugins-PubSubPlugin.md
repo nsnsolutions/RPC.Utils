@@ -101,8 +101,8 @@ context will be a seneca instance object._
 
 This plugin will add 2 new methods to the seneca object.
 
-1. [publish](publish) - Used to publish new messages onto an SNS Topic.
-2. [subscribe](subscribe) - Used to receive messages from an SNS Topic.
+1. [publish](#seneca.publish) - Used to publish new messages onto an SNS Topic.
+2. [subscribe](#seneca.subscribe) - Used to receive messages from an SNS Topic.
 
 __Options__
 
@@ -133,6 +133,7 @@ __Arguments__
 Recieving messages published to one or more SNS Topics.
 
 __Arguments__
+
 | Name | Type | Description |
 | ---- | ---- | ----------- |
 | pattern | jSonicString or Object | A jSonic string or object containing the following parameters. |
