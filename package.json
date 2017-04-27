@@ -1,6 +1,6 @@
 {
   "name": "rpc-utils",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "Tools and utilities for use with RPCFW Services.",
   "main": "lib/index.js",
   "scripts": {
@@ -23,14 +23,14 @@
   },
   "homepage": "https://github.com/nsnsolutions/RPC.Utils#readme",
   "devDependencies": {
-    "mocha": "^3.2.0"
+    "mocha": "3.3.0"
   },
   "dependencies": {
-    "async": "^2.1.4",
-    "aws-sdk": "^2.7.21",
-    "jsonic": "^0.2.2",
-    "moment": "^2.17.1",
-    "redis": "^2.6.5",
-    "uuid": "^3.0.1"
+    "async": "2.3.0",
+    "aws-sdk": "2.46.0",
+    "jsonic": "0.3.0",
+    "moment": "2.18.1",
+    "redis": "2.7.1",
+    "uuid": "3.0.1"
   }
 }
